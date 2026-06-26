@@ -1,7 +1,7 @@
 """
 Build the TIME-VARYING Village panel for within-person / within-between models.
 
-Change vs v1 (village_panel.csv): the village exposure is no longer fixed at Year 1.
+The village exposure is time-varying, not fixed at Year 1.
 v_instrumental (perceived instrumental support) and v_realized (gave/loaned to kin)
 are measured at EACH wave, then entered LAGGED (prior wave) to predict next-wave
 CIDI caseness -- the "support -> subsequent depression" alignment.

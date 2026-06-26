@@ -10,8 +10,8 @@ propagates to every downstream model, once.
 
 Wave codes (FFCWS prefix numbering): 1=Baseline, 2=Year 1, 3=Year 3, 4=Year 5, 5=Year 9.
 Scope: through Year 9 (prefix wave 5) — the LAST wave with CIDI depression caseness for
-both parents (Year 15 is not public). Earlier I briefly capped at Y5; restored to Y9 so the
-trajectory/persistence outcome keeps all four depression measurements.
+both parents (Year 15 is not public). Year 9 keeps all four depression measurements for the
+trajectory/persistence outcome.
 """
 
 from paths import DTA
@@ -54,16 +54,16 @@ INSTRUMENTAL = {
                      5: {"mother": "m5e6a",  "father": "f5e6a"}},
 }
 N_INSTRUMENT_ITEMS = len(INSTRUMENTAL)       # 6
-MIN_ITEMS_FOR_SCORE = 4                       # need >=4 of 6 non-missing (cf. old 3-of-4)
+MIN_ITEMS_FOR_SCORE = 4                       # need >=4 of 6 non-missing
 
 # Realized kin transfer — OUTFLOW reciprocity (gave/loaned money TO kin). Y3+ only.
-# Retained single item for backward compatibility (the old `v_realized`). 1=yes,2=no.
+# Single gave-to-kin item (`v_realized`). 1=yes,2=no.
 REALIZED = {3: {"mother": "m3l2", "father": "f3l2"},
             4: {"mother": "m4l2", "father": "f4l2"},
             5: {"mother": "m5j2", "father": "f5j2"}}
 
 # ENACTED kin support — RECEIPT / mobilization (borrowed money from family/friends to
-# pay bills, past year). This is the council's "enacted support" facet: a need-driven
+# pay bills, past year). This is the "enacted support" facet: a need-driven
 # RECEIVED measure expected to correlate POSITIVELY with distress (support mobilization),
 # kept as a SEPARATE feature from perceived support — never folded into the index.
 # Repeats across all three exposure waves (letter shifts h19i -> i23e -> i23h). 1=yes,2=no.
@@ -76,8 +76,6 @@ ENACTED = {2: {"mother": "m2h19i", "father": "f2h17i"},
 # from perceived capacity and enacted receipt). Constructed indicators (reliable coding):
 # baby's grandfather / grandmother present in the household. Coded 0=no, 1=yes (NOT 1/2).
 # v_grandparent = any grandparent in HH. Kept as a SEPARATE sibling facet, never folded in.
-# (Re-tested here at the researcher's request: v1 reported a null buffering effect, but v1
-# had known issues — the canonical layer lets the updated models confirm or revise that.)
 GRANDPARENT = {
     2: {"mother": ("cm2gdad", "cm2gmom"), "father": ("cf2gdad", "cf2gmom")},
     3: {"mother": ("cm3gdad", "cm3gmom"), "father": ("cf3gdad", "cf3gmom")},

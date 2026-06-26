@@ -98,7 +98,7 @@ def test_religion_binary(panel):
     assert set(panel["v_religion"].dropna().unique()) <= {0.0, 1.0}
 
 def test_village_facets_are_separate_columns(panel):
-    # the council/architecture invariant: the axes coexist as distinct columns,
+    # architecture invariant: the axes coexist as distinct columns,
     # and there is NO single folded composite 'v_village' score.
     for c in ["v_perceived", "v_enacted", "v_grandparent", "v_religion"]:
         assert c in panel.columns
@@ -110,7 +110,7 @@ def test_discordant_only_defined_for_receivers(panel):
     assert (panel.loc[panel["enacted_discordant"].notna(), "v_enacted"] == 1).all()
 
 def test_perceived_enacted_opposite_sign(panel):
-    # the council's core empirical claim: enacted correlates MORE positively with prior
+    # core empirical claim: enacted correlates MORE positively with prior
     # depression than perceived does -> they must not be folded into one index.
     rp = panel[["v_perceived", "dep_prev"]].corr().iloc[0, 1]
     re_ = panel[["v_enacted", "dep_prev"]].corr().iloc[0, 1]

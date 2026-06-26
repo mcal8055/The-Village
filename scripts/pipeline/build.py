@@ -55,7 +55,7 @@ def run():
         v_perceived_cov=("v_perceived", lambda s: s.notna().mean()),
         v_enacted_cov=("v_enacted", lambda s: s.notna().mean())).round(3).to_string())
 
-    # council's bracketing check: do perceived and enacted point opposite ways vs dep_prev?
+    # bracketing check: do perceived and enacted point opposite ways vs dep_prev?
     print("\n=== perceived vs enacted: raw association with PRIOR depression (sign check) ===")
     for p in ("mother", "father"):
         d = panel[panel.parent == p]

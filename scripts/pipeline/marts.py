@@ -1,7 +1,6 @@
 """
-MARTS LAYER — consumption-ready tables the models read. These OVERWRITE the existing
-processed CSVs (drop-in), so the Rmd, causal scripts, and DS notebook keep working with
-no code change — they just read upgraded, tested features.
+MARTS LAYER — consumption-ready tables the models read. These write the processed
+CSVs the Rmd, causal scripts, and DS notebook consume: tested, canonical features.
 
   dim_family_vulnerability -> data/processed/preexisting_vuln.csv   (family grain)
   fct_village_panel_tv     -> data/processed/village_panel_tv.csv    (lagged-transition grain)
@@ -29,7 +28,7 @@ def _wave_aggregates(stg, value_col, prefix, waves=MODEL_WAVES):
 
 
 def dim_family_vulnerability(int_fh, stg_cesd):
-    """Family-grain wide table. Keeps fh_mother/fh_father (= fh_any, backward-compatible)
+    """Family-grain wide table. Keeps fh_mother/fh_father (= fh_any)
     and cesd_father_baseline; adds graded burden/severity/suicide per parent."""
     wide = int_fh.pivot(index="idnum", columns="parent",
                         values=["fh_any", "fh_burden", "fh_severity", "fh_suicide"])
@@ -56,13 +55,13 @@ def dim_family_vulnerability(int_fh, stg_cesd):
 def fct_village_panel_tv(int_village, stg_realized, stg_enacted, stg_grandparent, stg_religion, dim_fh):
     """Lagged-transition panel: prior-wave exposure -> next-wave CIDI caseness.
 
-    FOUR SIBLING Village facets, never folded into one index (per the council resolution
-    and the multi-axis view of the village):
+    FOUR SIBLING Village facets, never folded into one index (the multi-axis
+    view of the village):
       v_perceived  (= v_instrumental) : CAPACITY;       expected protective (negative)
       v_enacted                       : MOBILIZATION;   expected POSITIVE (need-driven)
       v_grandparent                   : EMBEDDEDNESS;   structural co-residence (sign open)
       v_religion                      : PARTICIPATION;  attends services weekly+ (ablation)
-    v_realized (gave-to-kin outflow) is retained as a separate backward-compatible column.
+    v_realized (gave-to-kin outflow) is a separate column.
     enacted_discordant splits receipt by prior depression — the cut that distinguishes
     'village showed up' (received while not previously depressed) from 'mobilization'."""
     long = pd.read_csv(CASENESS_LONG)
@@ -89,7 +88,7 @@ def fct_village_panel_tv(int_village, stg_realized, stg_enacted, stg_grandparent
         d["dep_prev"] = prev["md_case_lib"]
         d["v_instrumental"] = prev["v_instrumental"]      # lagged exposure (perceived)
         d["v_perceived"] = prev["v_instrumental"]         # explicit perceived-axis alias
-        d["v_realized"] = prev["v_realized"]              # gave-to-kin (outflow), backward-compat
+        d["v_realized"] = prev["v_realized"]              # gave-to-kin (outflow)
         d["v_enacted"] = prev["v_enacted"]                # received/mobilized (expected +)
         d["v_grandparent"] = prev["v_grandparent"]        # structural embeddedness (sign open)
         d["v_religion"] = prev["v_religion"]              # participation: weekly+ attendance
@@ -126,8 +125,8 @@ def fct_village_wave(int_village, stg_realized, stg_enacted, stg_grandparent, st
 
 def obt_model_person(int_village, stg_realized, stg_enacted, stg_grandparent, stg_religion, dim_fh):
     """One-big-table person-level modeling mart (one row per family x parent) — the single
-    source the PREDICTIVE pipeline reads. Consolidates everything ds_build_profile.py derived,
-    now with the upgraded canonical features. Persistence honors the Y5 cap (Y1/Y3/Y5).
+    source the PREDICTIVE pipeline reads. Consolidates everything ds_build_profile.py derived.
+    Persistence honors the Y5 cap (Y1/Y3/Y5).
 
     Emits data/processed/obt_model_person.csv AND ds_person.csv (drop-in for the notebook)."""
     long = pd.read_csv(CASENESS_LONG)

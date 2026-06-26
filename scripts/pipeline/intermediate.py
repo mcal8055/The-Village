@@ -35,7 +35,7 @@ def _union_over_waves(stg_fh):
 
 def int_family_history(stg_fh):
     """Per idnum x parent: the graded family mental-health-history construct.
-      fh_any      : either bio-parent ever DEPRESSED (backward-compatible with prior `fh`)
+      fh_any      : either bio-parent ever DEPRESSED
       fh_burden   : count of endorsed (symptom x bio-parent) cells, 0..6
       fh_severity : max treatment-intensity level across depression+anxiety cells, 0..3
       fh_suicide  : either bio-parent ever attempted suicide
