@@ -1,6 +1,6 @@
 # The Village
 
-**Cause or Signature?** A causal analysis of social support ("the Village") and parental depression in the **Fragile Families and Child Wellbeing Study (FFCWS)**.
+**Cause or Signature?** A causal analysis of social support ("the Village") and parental depression in the **Future of Families and Child Wellbeing Study (FFCWS)**.
 
 ## The question
 
