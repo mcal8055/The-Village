@@ -30,18 +30,15 @@ Read together, that is the signature of a **stable common cause**, not a causal 
 
 ```
 paths.py                          Canonical filesystem anchors
-scripts/
-  pipeline/                       dbt-style data pipeline (the single source of truth)
-    sources.py                    raw FFCWS column registry (source layer)
-    staging.py / intermediate.py  harmonization + engineered constructs
-    marts.py                      analysis-ready marts (caseness panel, vulnerability,
+conftest.py                       Puts repo root on sys.path (imports + pytest)
+scripts/pipeline/                 dbt-style data pipeline (the single source of truth)
+  sources.py                      raw FFCWS column registry (source layer)
+  staging.py / intermediate.py    harmonization + engineered constructs
+  marts.py                        analysis-ready marts (caseness panel, vulnerability,
                                   village facets, lagged-transition panel)
-    build.py                      `python3 -m scripts.pipeline.build`
-    tests/test_contract.py        dbt-style data tests (unique / not-null / ranges / reconciliation)
-  catalog/explore_catalog.py      raw-.dta source inventory / discovery
-  stage2_bch*.py, stage2b*.py     BCH 3-step predictors of the persistent class (+ bootstrap)
-  village_models*.py              within-person village models (Python/StepMix)
-figures/make_*.py                 figure builders
+  build_ffcws_dataset.py          builds the upstream CIDI caseness panel from the raw .dta
+  build.py                        `python3 -m scripts.pipeline.build`
+  tests/test_contract.py          dbt-style data tests (unique / not-null / ranges / reconciliation)
 FFCWS_Village_Analysis.Rmd        the consolidated causal analysis (clustering + the ladder)
 ```
 

@@ -6,7 +6,7 @@ CSVs the Rmd, causal scripts, and DS notebook consume: tested, canonical feature
   fct_village_panel_tv     -> data/processed/village_panel_tv.csv    (lagged-transition grain)
 
 Caseness + covariates are consumed from data/processed/ffcws_parental_mh_long.csv, an
-established upstream source (built by build_ffcws_dataset.py); only the two ENGINEERED
+established upstream source (built by scripts/pipeline/build_ffcws_dataset.py); only the two ENGINEERED
 constructs (Village instrumental, family history) are re-derived canonically here.
 """
 import numpy as np

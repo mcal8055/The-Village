@@ -3,8 +3,8 @@ SOURCE LAYER — the single, auditable registry of every raw FFCWS column the
 canonical Village / family-history pipeline consumes.
 
 All names were verified present in the public-use .dta header
-(data/ICPSR_31622/DS0001/31622-0001-Data.dta) by scripts/catalog/explore_catalog.py
-and the validation pass in the build. This module holds NO logic — only the map
+(data/ICPSR_31622/DS0001/31622-0001-Data.dta) by the validation pass in the build.
+This module holds NO logic — only the map
 from construct -> wave -> source variable. Change a measurement decision HERE and it
 propagates to every downstream model, once.
 
