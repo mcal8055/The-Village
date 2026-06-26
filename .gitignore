@@ -36,3 +36,6 @@ figures/repro/
 # ---- Predictive pipeline — separate exercise, add when ready ----
 scripts/repro/
 FFCWS_Village_Predictive_Analysis.ipynb
+
+# ---- Published GitHub Pages site (docs/) — aggregate findings only, no microdata ----
+!docs/*.html
