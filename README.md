@@ -6,7 +6,6 @@
 
 When a parent has people they can lean on — someone to lend $200, offer a place to stay, watch the kids in an emergency — are they *protected* from depression? Or do low support and depression simply travel together because both flow from a shared, stable vulnerability?
 
-Put sharply: **is the Village a cause, or a signature?**
 
 ## Approach
 
@@ -23,7 +22,7 @@ Upstream of the ladder: latent **trajectory clustering** (group-based trajectory
 
 ## Headline finding
 
-Parental depression is **trait-like / vulnerability-driven**, not an infant-period spike. **Family-history vulnerability dominates SES** in predicting persistence. Social support is **protective between persons but null within persons** — across all four facets (perceived, enacted, grandparent co-residence, religious participation), under both estimators, for mothers and fathers, with a symmetric null in the reverse direction.
+Parental depression is **trait-like / vulnerability-driven**, not a perinatal, temporal spike. **Family-history vulnerability dominates SES** in predicting persistence. Social support is **protective between persons but null within persons** — across all four facets (perceived, enacted, grandparent co-residence, religious participation), under both estimators, for mothers and fathers, with a symmetric null in the reverse direction.
 
 Read together, that is the signature of a **stable common cause**, not a causal lever: the Village is most plausibly a *marker* of an underlying disposition, not something that *moves* parental depression within a person. (Observational; the within-person design removes time-invariant confounding only — this is "no within-person effect after removing stable confounding," not a proven zero.)
 
