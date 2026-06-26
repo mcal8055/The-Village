@@ -4,9 +4,9 @@
     {
       "id": 0,
       "name": "er-visits-zeroinflated-dropout",
-      "prompt": "I have a CSV at /Users/joshmcalister/.claude/skills/longitudinal-cluster-analysis-workspace/data/er_visits_trajectories.csv with columns patient_id, month, er_visits — monthly emergency-room visit counts for ~600 patients across 6 monthly waves. Most patients have 0 visits in most months, and there's clear dropout after month 4. I want to know whether there are distinct subtypes of patients in how their ER use evolves over time: how many groups, what each group looks like, and whether I can trust the grouping. Please walk me through it and actually run the analysis.",
+      "prompt": "I have a CSV at ./data/er_visits_trajectories.csv with columns patient_id, month, er_visits — monthly emergency-room visit counts for ~600 patients across 6 monthly waves. Most patients have 0 visits in most months, and there's clear dropout after month 4. I want to know whether there are distinct subtypes of patients in how their ER use evolves over time: how many groups, what each group looks like, and whether I can trust the grouping. Please walk me through it and actually run the analysis.",
       "expected_output": "A trajectory-clustering analysis that (a) recognizes the response is a zero-inflated COUNT (not continuous-normal) and chooses/justifies an appropriate distribution rather than Gaussian k-means on the raw values; (b) addresses the dropout/missingness mechanism (MAR assumption, attrition by month); (c) enumerates the number of classes with BIC + at least one other consideration and a 1-class baseline; (d) validates the solution (bootstrap/holdout/CV) and warns about overfitting/double-dipping; (e) profiles the classes and interprets cautiously (indirect vs direct). Bonus: recovers ~3 classes.",
-      "files": ["/Users/joshmcalister/.claude/skills/longitudinal-cluster-analysis-workspace/data/er_visits_trajectories.csv"]
+      "files": ["./data/er_visits_trajectories.csv"]
     },
     {
       "id": 1,
