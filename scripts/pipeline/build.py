@@ -3,18 +3,22 @@
 Canonical FFCWS feature pipeline — DAG runner.
 
   raw .dta
+    -> dataset   (parental-MH caseness panel -> ffcws_parental_mh_long.csv)
     -> staging   (recode-once, harmonize wave-shifting names)
     -> intermediate (Village instrumental score; graded family-history)
-    -> marts     (preexisting_vuln.csv, village_panel_tv.csv) [drop-in]
+    -> marts     (preexisting_vuln.csv, village_panel_tv.csv)
 
 Run from the repo root:  python3 -m scripts.pipeline.build
 """
+from . import build_ffcws_dataset as caseness
 from . import staging as stg
 from . import intermediate as itm
 from . import marts as mt
 
 
 def run():
+    print("[dataset]  building parental-MH caseness panel from raw .dta ...")
+    caseness.build()
     print("[staging]  reading raw .dta (registered source columns only) ...")
     raw = stg.read_raw()
     s_instr = stg.stg_instrumental(raw)

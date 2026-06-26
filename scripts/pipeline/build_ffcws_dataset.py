@@ -13,7 +13,8 @@ USAGE:
      (free Researcher Passport account + accept Terms of Use; NO approval needed).
      Choose Stata (.dta) or Delimited (.csv) format.
   2. Put the data file in  data/raw/  (any .dta or .csv; the merged "all-waves" file).
-  3. Run:  python3 scripts/build_ffcws_dataset.py
+  3. Run the pipeline (this step runs first):  python3 -m scripts.pipeline.build
+     (or standalone:  python3 -m scripts.pipeline.build_ffcws_dataset)
 
 Variable names verified against the public wave codebooks (see FFCWS_variable_map.md).
 """
@@ -155,29 +156,40 @@ def summarize(df, long):
     return "\n".join(L)
 
 
-def main():
+def build(verbose=True):
+    """Build the parental-MH caseness panel from the raw .dta; write the CSVs + QA
+    summary; return (long_df, summary_str). Raises if the data file is absent or
+    malformed, so callers (the pipeline DAG, the CLI) decide how to report it."""
     path = find_input()
     if not path:
-        print(__doc__)
-        print("\n>>> No FFCWS data file found in data/raw/. "
-              "Download it first (see USAGE above), then re-run. <<<")
-        sys.exit(0)
+        raise FileNotFoundError(
+            "No FFCWS data file found. Download the public-use merged file "
+            "(ICPSR 31622) into data/ — see this module's docstring.")
     df = load_selected(path, target_columns())
     if "idnum" not in df.columns:
-        sys.exit("ERROR: 'idnum' not found — is this the FFCWS merged file?")
+        raise ValueError("'idnum' not found — is this the FFCWS merged file?")
 
     long = build_long(df)
     wide = df[[c for c in target_columns() if c in df.columns]].copy()
-
     long.to_csv(f"{OUT}/ffcws_parental_mh_long.csv", index=False)
     wide.to_csv(f"{OUT}/ffcws_parental_mh_wide.csv", index=False)
     summary = summarize(df, long)
     with open(f"{OUT}/ffcws_build_summary.txt", "w") as f:
         f.write(summary)
+    if verbose:
+        print(f"           ffcws_parental_mh_long.csv ({len(long)} rows), "
+              f"_wide.csv ({wide.shape[1]} cols), _summary.txt")
+    return long, summary
+
+
+def main():
+    try:
+        _, summary = build()
+    except FileNotFoundError as e:
+        print(__doc__)
+        print(f"\n>>> {e} <<<")
+        sys.exit(0)
     print("\n" + summary)
-    print(f"\nWrote:\n  {OUT}/ffcws_parental_mh_long.csv  ({len(long)} rows)"
-          f"\n  {OUT}/ffcws_parental_mh_wide.csv  ({len(wide)} cols={wide.shape[1]})"
-          f"\n  {OUT}/ffcws_build_summary.txt")
 
 
 if __name__ == "__main__":
