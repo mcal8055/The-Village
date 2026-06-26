@@ -40,6 +40,8 @@ scripts/pipeline/                 dbt-style data pipeline (the single source of 
   build.py                        `python3 -m scripts.pipeline.build`
   tests/test_contract.py          dbt-style data tests (unique / not-null / ranges / reconciliation)
 FFCWS_Village_Analysis.Rmd        the consolidated causal analysis (clustering + the ladder)
+skills/
+  longitudinal-cluster-analysis/  the GBTM/GRoLTS trajectory-clustering method behind Stage 1
 ```
 
 ## Data (not included)

@@ -1,0 +1,33 @@
+{
+  "skill_name": "longitudinal-cluster-analysis",
+  "evals": [
+    {
+      "id": 0,
+      "name": "er-visits-zeroinflated-dropout",
+      "prompt": "I have a CSV at /Users/joshmcalister/.claude/skills/longitudinal-cluster-analysis-workspace/data/er_visits_trajectories.csv with columns patient_id, month, er_visits — monthly emergency-room visit counts for ~600 patients across 6 monthly waves. Most patients have 0 visits in most months, and there's clear dropout after month 4. I want to know whether there are distinct subtypes of patients in how their ER use evolves over time: how many groups, what each group looks like, and whether I can trust the grouping. Please walk me through it and actually run the analysis.",
+      "expected_output": "A trajectory-clustering analysis that (a) recognizes the response is a zero-inflated COUNT (not continuous-normal) and chooses/justifies an appropriate distribution rather than Gaussian k-means on the raw values; (b) addresses the dropout/missingness mechanism (MAR assumption, attrition by month); (c) enumerates the number of classes with BIC + at least one other consideration and a 1-class baseline; (d) validates the solution (bootstrap/holdout/CV) and warns about overfitting/double-dipping; (e) profiles the classes and interprets cautiously (indirect vs direct). Bonus: recovers ~3 classes.",
+      "files": ["/Users/joshmcalister/.claude/skills/longitudinal-cluster-analysis-workspace/data/er_visits_trajectories.csv"]
+    },
+    {
+      "id": 1,
+      "name": "enumeration-lcga-vs-gmm",
+      "prompt": "We're fitting trajectory models to 5 waves of a continuous symptom score. Every time we add another latent class the BIC gets lower, so the 'best' model just keeps growing and we don't know where to stop. How do we actually decide the number of trajectory classes without overfitting? And separately — someone said we should decide between LCGA and a growth mixture model by whether we fix or estimate the within-class variance. What is that choice and how does it affect the result?",
+      "expected_output": "Guidance that: warns against choosing k by BIC alone; recommends multiple criteria (BLRT/LMR, entropy for separation not selection, parsimony, theory), a 1-class baseline and fitting beyond the apparent optimum, many random starts, and validation (holdout/bootstrap/CV) to avoid overfitting/double-dipping. Correctly explains LCGA (within-class variance fixed to 0) vs GMM (estimated random effects), the trade-offs (GMM more flexible but convergence-prone/needs larger N; LCGA needs more classes to absorb intercept variance), and recommends comparing both. References reporting (GRoLTS) ideally.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "covariate-uncertainty",
+      "prompt": "We identified 3 latent recovery trajectories in our patients using a growth mixture model. Now I want to test whether household income predicts which trajectory a patient follows. Can I just assign each patient to their most likely class and run a multinomial regression on income? What's the correct way to do this?",
+      "expected_output": "Explains that naive modal-class assignment + regression ignores classification uncertainty and ATTENUATES the covariate effect; recommends a bias-adjusted three-step approach (BCH — robust to distributional violations; or ML), or a one-step model (with its caveats: changes class meaning, inflates entropy), or pseudo-class/MI. Names the entropy as relevant. Points to software (stepmix / lcmm / Latent GOLD / Mplus). Ideally mentions avoiding double-dipping if classes and covariate test share data.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "direct-vs-indirect-reporting",
+      "prompt": "Our growth mixture model gave us 4 trajectory classes. My PI is asking whether these are real, distinct subtypes of patients or just a convenient way to summarize variation — and a reviewer wants us to follow the reporting guidelines for this kind of study. How should we think about that question, and what do we need to report?",
+      "expected_output": "Distinguishes DIRECT (confirmatory — real distinct clusters, needs strong separation, large overlap discredits) vs INDIRECT (approximation/summary of a continuum — overlap still useful, no single true k) interpretation, and how to judge (entropy/separation, practical vs statistical meaningfulness, replication). For reporting, invokes the GRoLTS checklist and names key items: time metric, distribution, missing data, software+version, random starts, models fit incl. 1-class, class sizes, entropy, mean-trajectory plots, numeric class characteristics, covariate-uncertainty method, syntax availability.",
+      "files": []
+    }
+  ]
+}
