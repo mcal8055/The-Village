@@ -1,0 +1,38 @@
+# ---- Restricted / large data (FFCWS is restricted-use; never commit) ----
+data/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- R / knitr render artifacts ----
+*_cache/
+*_files/
+Rplots.pdf
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- OS / editor ----
+.DS_Store
+.idea/
+
+# ---- Local tool config ----
+.claude/settings.local.json
+
+# ---- Vendored skill clone (own git repo; not part of this project) ----
+Claude-Skills/
+
+# ---- Generated / data-derived outputs (restricted-use; kept local, never committed) ----
+analysis/
+*.html
+*.log
+experiments.json
+figures/*.png
+figures/repro/
+
+# ---- Predictive pipeline — separate exercise, add when ready ----
+scripts/repro/
+FFCWS_Village_Predictive_Analysis.ipynb

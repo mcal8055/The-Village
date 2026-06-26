@@ -1,0 +1,52 @@
+# DATA CONTRACT — semantic layer for the canonical FFCWS feature marts.
+# The single source of truth for grain, keys, and value ranges. Enforced by
+# scripts/pipeline/tests/test_contract.py. Edit a measurement decision in sources.py;
+# edit the expectation it must satisfy HERE.
+
+scope:
+  waves: [Baseline, Year 1, Year 3, Year 5, Year 9]   # through Y9, the last CIDI-caseness wave
+  families_expected: 4898                              # rows in the public-use .dta
+
+models:
+  dim_family_vulnerability:
+    materialized: data/processed/preexisting_vuln.csv
+    grain: one row per family (idnum)
+    primary_key: idnum
+    columns:
+      idnum:               {tests: [unique, not_null]}
+      fh_mother:           {description: "either bio-parent of mother ever depressed (backward-compatible fh)", accepted_values: [0, 1]}
+      fh_father:           {description: "either bio-parent of father ever depressed", accepted_values: [0, 1]}
+      cesd_father_baseline:{description: "father baseline CES-D sum (12 items)", min: 0}
+      fh_mother_burden:    {description: "count of endorsed symptom x bio-parent cells", min: 0, max: 6}
+      fh_father_burden:    {min: 0, max: 6}
+      fh_mother_severity:  {description: "max treatment-intensity (0 none..3 hospitalized)", min: 0, max: 3}
+      fh_father_severity:  {min: 0, max: 3}
+      fh_mother_suicide:   {accepted_values: [0, 1]}
+      fh_father_suicide:   {accepted_values: [0, 1]}
+    expectations:
+      fh_mother_prevalence: {between: [0.30, 0.37]}   # documented ~0.33
+      fh_father_prevalence: {between: [0.26, 0.33]}   # documented ~0.29
+
+  fct_village_panel_tv:
+    materialized: data/processed/village_panel_tv.csv
+    grain: one row per family x parent x outcome-wave transition
+    primary_key: [idnum, parent, wave_out]
+    columns:
+      dep_t:          {description: "CIDI caseness at outcome wave", accepted_values: [0, 1], not_null: true}
+      dep_prev:       {description: "CIDI caseness at prior wave", accepted_values: [0, 1], not_null: true}
+      v_instrumental: {description: "harmonized 6-item perceived instrumental support (lagged)", min: 0, max: 1}
+      v_perceived:    {description: "perceived-axis alias of v_instrumental; expected PROTECTIVE (neg)", min: 0, max: 1}
+      v_enacted:      {description: "enacted receipt: borrowed from kin (lagged); SEPARATE facet, expected POSITIVE (mobilization)", accepted_values: [0, 1]}
+      v_grandparent:  {description: "embeddedness: any grandparent in HH (lagged); SEPARATE facet, sign OPEN (re-testing v1 null)", accepted_values: [0, 1]}
+      v_religion:     {description: "participation: attends services weekly+ (lagged); SEPARATE ablatable facet; harmonized binary over shifting/version-coded scales", accepted_values: [0, 1]}
+      enacted_discordant: {description: "among receivers: 1=received while not prev-depressed, 0=mobilization; NaN if no receipt", accepted_values: [0, 1]}
+      v_realized:     {description: "retained single-item gave-to-kin OUTFLOW (lagged)", accepted_values: [0, 1]}
+      fh:             {description: "family-history (= fh_<parent>)", accepted_values: [0, 1]}
+      wave_out:       {accepted_values: [3, 4, 5]}   # Y3, Y5, Y9 outcomes
+      parent:         {accepted_values: [mother, father]}
+    expectations:
+      v_instrumental_coverage: {min: 0.90}        # >=90% of rows have a perceived score
+      # NOTE: v_enacted coverage is sparse for fathers at Y1 (f2h17i low-N) -> no hard gate.
+      perceived_enacted_opposite_sign: true       # corr(enacted,dep_prev) > corr(perceived,dep_prev)
+      # ^ the council's core finding: the two facets confound in OPPOSITE directions,
+      #   which is exactly why they must never be averaged into a single Village index.

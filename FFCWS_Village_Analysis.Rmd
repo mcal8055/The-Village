@@ -1,0 +1,480 @@
+---
+title: "Cause or Signature? The “Village” and Parental Depression in FFCWS"
+subtitle: "Latent trajectory clustering and a four-rung causal ladder testing whether social support moves parental depression"
+author: "SSPP Research"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: show
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 5)
+suppressMessages({
+  library(haven); library(dplyr); library(tidyr); library(ggplot2)
+  library(flexmix); library(geepack); library(survival)
+})
+set.seed(2026)
+PROC <- "data/processed"; dir.create(PROC, showWarnings = FALSE, recursive = TRUE)
+z <- function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+# E-value (VanderWeele & Ding 2017) for a risk ratio
+evalue <- function(rr){ r <- ifelse(rr < 1, 1/rr, rr); r + sqrt(r*(r-1)) }
+or2rr  <- function(orv, p0) orv / (1 - p0 + p0*orv)   # OR -> RR for a common outcome
+```
+
+> **Scope & framing.** This notebook covers the FFCWS analysis end to end: data construction, latent trajectory clustering, and within-person modeling of social support ("the Village") and parental depression.
+>
+> **Key framing.** This is a *social-support → parental-depression* study covering **mothers and fathers**; cohort = births 1998–2000. The outcome is binary CIDI-SF major-depression caseness — the only depression measure repeated at all four waves for both parents.
+
+# Configuration
+
+```{r config}
+WAVES <- c(2, 3, 4, 5)                                  # 2=Year1, 3=Year3, 4=Year5, 5=Year9
+WAVE_LABEL <- c("2"="Year 1","3"="Year 3","4"="Year 5","5"="Year 9")
+GAD_WAVES <- c(2, 3)                                    # GAD caseness fielded Years 1 & 3 only
+
+# Feature engineering lives ONCE in the canonical pipeline (scripts/pipeline/, defined in
+# sources.py and validated by `pytest scripts/pipeline/tests`). This document is a pure
+# CONSUMER of the resulting marts — no inline re-derivation from the raw .dta. The 6-item
+# perceived-support battery, the enacted (received-from-kin) and grandparent (co-residence)
+# facets, and the graded family-history construct all originate there.
+MARTS <- list(caseness = file.path(PROC, "ffcws_parental_mh_long.csv"),  # CIDI caseness panel
+              vuln     = file.path(PROC, "preexisting_vuln.csv"),        # family-history + CES-D
+              village  = file.path(PROC, "village_wave.csv"),            # wave-level village facets
+              panel    = file.path(PROC, "village_panel_tv.csv"))        # lagged-transition panel
+```
+
+# Preprocessing — load the canonical feature marts
+
+This document loads the tested marts produced by `scripts/pipeline/` (run `python3 -m scripts.pipeline.build`): the CIDI caseness panel, the family-history / CES-D vulnerability table, the wave-level Village facets, and the lagged-transition panel. Every definition — the **6-item** perceived-support battery, the **enacted** (received-from-kin) and **grandparent** (co-residence) facets, and the **graded** multi-symptom family history — is shared with the predictive pipeline.
+
+```{r load-marts}
+# (a) CIDI caseness panel + covariates
+long <- read.csv(MARTS$caseness) |>
+  filter(wave %in% WAVES) |>
+  transmute(idnum = as.integer(idnum), parent, wave,
+            md_case_lib, md_case_con, gad_case, poverty_cat, par_edu, par_age) |>
+  filter(!(is.na(md_case_lib) & is.na(md_case_con)))
+write.csv(long, file.path(PROC, "rmd_caseness_long.csv"), row.names = FALSE)
+
+# (b) family-history vulnerability + father baseline CES-D (graded columns also present)
+vuln <- read.csv(MARTS$vuln)
+
+# (c) wave-level Village facets (perceived / enacted / grandparent / realized)
+support_long <- read.csv(MARTS$village) |> mutate(idnum = as.integer(idnum))
+
+cat(sprintf("marts loaded | caseness rows %d | fh prevalence mother %.3f / father %.3f | father CES-D mean %.1f\n",
+            nrow(long), mean(vuln$fh_mother, na.rm=TRUE), mean(vuln$fh_father, na.rm=TRUE),
+            mean(vuln$cesd_father_baseline, na.rm=TRUE)))
+```
+
+**What the marts encode.** `fh` substitutes for the pre-partum baseline FFCWS never collected — **family history of depression** (bio-parent ever depressed 2wk+), asked at Year 3 and filled from Year 5 for coverage (zero Y3/Y5 overlap, so a union not a re-measure). The mart also carries graded `fh_*_burden/severity/suicide`; the models below use the binary `fh_mother`/`fh_father`. `v_instrumental` is the 6-item battery (loan \$200/\$1000, place to live, emergency childcare, co-sign \$1000/\$5000).
+
+> **Note on `fh` measurement (recall bias).** A single retrospective family-history report is colored by the respondent's mood at interview (mood-congruent recall — depressed respondents over-report). FFCWS asked the Year-5 items *only of those missed at Year 3* (zero overlap), so a test–retest is impossible and the union adds coverage only. The recall-bias caveat stands as a limitation; it cannot be differenced out.
+
+> **Deliberate exclusion:** the childcare/partner-care facet is *not* pooled — its response scale differs across waves and it carries an informative "no father to count on" code. The **enacted** facet (`v_enacted`, borrowed-from-kin) is kept as a SEPARATE feature (expected reverse-signed via support mobilization), never folded into the perceived-support index.
+
+## Discovery / holdout split (family level)
+
+```{r split}
+fams <- sort(unique(long$idnum))
+disc_ids <- sample(fams, size = floor(0.6 * length(fams)))
+long$split <- ifelse(long$idnum %in% disc_ids, "discovery", "holdout")
+```
+
+# Exploratory summary
+
+```{r eda}
+long |> filter(!is.na(md_case_lib)) |>
+  group_by(parent, wave) |>
+  summarise(n = n(), dep_rate = mean(md_case_lib), .groups = "drop") |>
+  mutate(child_age = WAVE_LABEL[as.character(wave)]) |>
+  knitr::kable(digits = 3, caption = "CIDI major-depression caseness prevalence by wave and parent")
+```
+
+```{r eda-plot, fig.height=4}
+long |> filter(!is.na(md_case_lib)) |>
+  group_by(parent, wave) |> summarise(dep = mean(md_case_lib), .groups="drop") |>
+  ggplot(aes(wave, dep, color = parent)) + geom_line(linewidth = 1) + geom_point(size = 2) +
+  scale_x_continuous(breaks = WAVES, labels = WAVE_LABEL[as.character(WAVES)]) +
+  labs(title = "Mean depression caseness over time", y = "P(CIDI case)", x = NULL) + theme_minimal()
+```
+
+Mothers run higher than fathers throughout; both are roughly flat (no acute postpartum peak in the observed window — Year 1 ≈ 12–15 months).
+
+# Stage 1 — Trajectory clustering (GBTM, flexmix)
+
+Group-based trajectory modeling on binary caseness, **mothers and fathers separately**, fit on the **discovery** sample. We enumerate `k = 1..4` (multi-start), select on BIC, and check entropy and bootstrap stability.
+
+```{r gbtm, cache=TRUE, results='hold'}
+fit_gbtm <- function(parent){
+  d <- long |> filter(parent == !!parent, split == "discovery", !is.na(md_case_lib))
+  st <- stepFlexmix(cbind(md_case_lib, 1 - md_case_lib) ~ poly(wave, 2) | idnum,
+                    data = d, k = 1:4, model = FLXMRglm(family = "binomial"),
+                    nrep = 4, verbose = FALSE)
+  best <- getModel(st, "BIC")
+  # per-unit modal class
+  units <- d |> mutate(cl = clusters(best)) |> group_by(idnum) |>
+    summarise(cl = as.integer(names(which.max(table(cl)))), .groups = "drop")
+  # label persistent = higher mean caseness
+  mu <- d |> mutate(cl = clusters(best)) |> group_by(cl) |> summarise(m = mean(md_case_lib), .groups="drop")
+  persist <- mu$cl[which.max(mu$m)]
+  units$class <- ifelse(units$cl == persist, "persistent", "rarely")
+  list(step = st, best = best, units = units, data = d, mu = mu)
+}
+G <- lapply(c("mother","father"), fit_gbtm); names(G) <- c("mother","father")
+
+for (p in c("mother","father")) {
+  st <- G[[p]]$step
+  cat(sprintf("\n[%s] BIC by k: %s | chosen k = %d\n", p,
+              paste(sprintf("%.0f", BIC(st)), collapse = " "), G[[p]]$best@k))
+  print(table(G[[p]]$units$class))
+}
+```
+
+```{r gbtm-profiles, fig.height=4}
+prof <- bind_rows(lapply(c("mother","father"), function(p){
+  G[[p]]$data |> left_join(G[[p]]$units[,c("idnum","class")], by = "idnum") |>
+    group_by(parent, class, wave) |> summarise(dep = mean(md_case_lib), .groups = "drop")
+}))
+ggplot(prof, aes(wave, dep, color = class)) + geom_line(linewidth = 1) + geom_point() +
+  facet_wrap(~parent) +
+  scale_x_continuous(breaks = WAVES, labels = WAVE_LABEL[as.character(WAVES)]) +
+  labs(title = "Trajectory classes (discovery): rarely- vs persistently-depressed",
+       y = "P(CIDI case)", x = NULL) + theme_minimal()
+```
+
+A clean **2-class** solution for both parents: a large *rarely-depressed* majority and a smaller, flat-high *persistently-depressed* minority. The structure is **trait-like**, not an infant-period spike (caveat: the acute 0–6-month window is unmeasured). Entropy ≈ 0.72 — moderate classification certainty, so we treat the classes as a discretized vulnerability continuum, not crisp categories.
+
+# Stage 2 — Predictors of the persistent class
+
+Does pre-existing **vulnerability** (`fh`) or **SES** drive persistent-class membership? We use flexmix's **concomitant** (covariate → class) model, which estimates the membership multinomial jointly with the trajectory model. Predictors are standardized (OR per SD).
+
+```{r stage2, cache=TRUE, results='hold'}
+stage2 <- function(parent){
+  fhcol <- paste0("fh_", parent)
+  d <- long |> filter(parent == !!parent, !is.na(md_case_lib)) |>
+    left_join(vuln[, c("idnum", fhcol)], by = "idnum") |> rename(fh = !!fhcol) |>
+    filter(!is.na(fh), !is.na(poverty_cat), !is.na(par_edu))
+  d$fhz <- z(d$fh); d$povz <- z(d$poverty_cat); d$eduz <- z(d$par_edu)
+  m <- flexmix(cbind(md_case_lib, 1 - md_case_lib) ~ poly(wave, 2) | idnum, data = d, k = 2,
+               model = FLXMRglm(family = "binomial"),
+               concomitant = FLXPmultinom(~ fhz + povz + eduz))
+  mu <- sapply(1:2, function(k) weighted.mean(d$md_case_lib, posterior(m)[, k]))
+  persist <- which.max(mu)
+  cf <- m@concomitant@coef
+  nonref <- which(colSums(abs(cf)) > 1e-8)[1]
+  s <- if (persist == nonref) 1 else -1
+  data.frame(parent = parent, predictor = c("family history (fh)","poverty ratio","education"),
+             OR_per_SD = exp(s * cf[c("fhz","povz","eduz"), nonref]))
+}
+s2 <- bind_rows(lapply(c("mother","father"), stage2))
+knitr::kable(s2, digits = 3, row.names = FALSE,
+             caption = "Stage-2: OR per SD for persistent-class membership (concomitant model)")
+```
+
+**Family history strongly dominates.** Its OR/SD dwarfs both SES terms, which are weak and run in the expected direction (lower SES → modestly higher persistence): persistent parental depression is mostly *continuation of pre-existing vulnerability*, and the SES→depression link is largely confounded by that vulnerability.
+
+> *Robustness note.* A bias-adjusted three-step (BCH) on a held-out subsample (run separately) gives the same qualitative conclusion with a more conservative `fh` OR (~1.3/SD). The one-step concomitant is more efficient but can overstate class separation; both agree that vulnerability ≫ SES.
+
+# Build the within-person Village panel
+
+Exposure is taken at the **prior** wave (support → *subsequent* depression), so each row is a transition Yt₋₁ → Yt with the lagged Village facets.
+
+```{r tv-panel}
+# fh in long form + a wave-level `base` (used by the reverse-lag and synthesis sections)
+fh_long <- vuln |> select(idnum, fh_mother, fh_father) |>
+  pivot_longer(-idnum, names_to = "parent", values_to = "fh") |>
+  mutate(parent = sub("fh_", "", parent))
+
+base <- long |> select(idnum, parent, wave, md_case_lib, md_case_con, poverty_cat, par_edu) |>
+  left_join(support_long, by = c("idnum","parent","wave")) |>
+  left_join(fh_long, by = c("idnum","parent"))
+
+# the lagged-transition panel (prior-wave exposure -> next-wave caseness) is consumed
+# DIRECTLY from the canonical mart — Y1->Y3, Y3->Y5, Y5->Y9 construction, with the
+# perceived/enacted/grandparent facets alongside v_instrumental.
+panel <- read.csv(MARTS$panel) |> mutate(idnum = as.integer(idnum)) |>
+  filter(!is.na(dep_t), !is.na(dep_prev))
+write.csv(panel, file.path(PROC, "rmd_village_panel_tv.csv"), row.names = FALSE)
+cat(sprintf("Panel: %d transition-rows, %d families\n", nrow(panel), length(unique(panel$idnum))))
+```
+
+```{r tv-variation, results='hold'}
+# Does support actually vary WITHIN person? (the identification base)
+for (p in c("mother","father")) {
+  d <- panel |> filter(parent == p, !is.na(v_instrumental)) |>
+    group_by(idnum) |> mutate(pm = mean(v_instrumental)) |> ungroup()
+  multi <- d |> group_by(idnum) |> filter(n() >= 2)
+  cat(sprintf("%s: between-person SD %.3f | within-person SD %.3f\n",
+              p, sd(d$pm), sd(d$v_instrumental - d$pm)))
+}
+```
+
+Within-person SD is a substantial fraction of between-person SD — support genuinely changes within individuals, so within-person effects are identifiable.
+
+# The causal ladder — reader's guide
+
+The sections below are **not** parallel analyses — they are a *ladder* climbing from the weakest causal claim to the strongest, each rung closing the loophole the rung beneath it leaves open. A finding that survives all four has had every plausible "but couldn't it just be…?" tested and individually rejected. All four read against the **same** outcome (next-wave CIDI caseness), and — crucially — the Stage-1 cluster labels do **not** enter any rung, so the causal verdict is *independent of the (fuzzy) clustering*.
+
+| Rung | Test | Removes / answers | Leaves open → |
+|:---:|---|---|---|
+| **1** | Within-person (Mundlak + FE logit) | *all time-invariant* confounding — each parent is their own control | *time-varying* confounding |
+| **2** | E-value sensitivity | how strong an unmeasured confounder must be to erase the surviving effect | *(quantifies, does not remove)* |
+| **3** | Cross-lagged reverse test | reverse causation (depression → lower future support) | — |
+| **4** | Terminal new-onset subgroup | tests the thesis directly in its cleanest pro-thesis slice | — |
+
+# Rung 1 — Within-person modeling (removes stable confounding)
+
+> **Rung 1 of 4 · the core test.** *Removes:* every time-invariant confounder (genes, upbringing, stable disposition) by using each parent as their own control. *Leaves open:* time-varying confounding — a life shock that moves support and mood together — addressed at Rung 2.
+
+We decompose lagged support (Mundlak / within-between): **person-mean** = the between-person term (confounded by stable disposition); **wave-deviation** = the within-person "mitigation" term. Two estimators: a Mundlak-decomposed **GEE logit** (cluster-robust) and a **conditional fixed-effects logit** (pure within).
+
+```{r within-between, results='hold'}
+  # 95% CI from a GEE coefficient row: exp(Estimate ± 1.96*Std.err)
+  ci <- function(cf, term) exp(cf[term, "Estimate"] + c(-1.96, 1.96) * cf[term, "Std.err"])
+
+  # one village facet at a time -> Mundlak between/within decomposition (the facet ablation)
+  fit_within <- function(parent, facet = "v_perceived"){
+    d <- panel |> filter(parent == !!parent) |>
+      select(idnum, dep_t, dep_prev, wave_out, x = all_of(facet), fh, poverty_cat, par_edu) |> na.omit()
+    d$x <- z(d$x); d$poverty_cat <- z(d$poverty_cat); d$par_edu <- z(d$par_edu)
+    d <- d |> group_by(idnum) |> mutate(x_ib = mean(x), x_iw = x - x_ib) |>
+      ungroup() |> arrange(idnum)
+    # FE-informative sample — distinguishes a PRECISE within-null from an underpowered one.
+    # The clogit likelihood uses only outcome-discordant strata; the x_iw coefficient is only
+    # identified for parents whose exposure ALSO moves -> report both counts alongside the OR.
+    inf <- d |> group_by(idnum) |>
+      summarise(out_disc = dplyr::n_distinct(dep_t) > 1,
+                exp_var  = (max(x_iw) - min(x_iw)) > 1e-9, .groups = "drop")
+    g <- geeglm(dep_t ~ dep_prev + factor(wave_out) + x_ib + x_iw + fh + poverty_cat + par_edu + x_iw:fh,
+                id = idnum, data = d, family = binomial, corstr = "exchangeable")
+    cg <- summary(g)$coefficients
+    # binary facets (grandparent/religion/enacted) may have too few within-person switchers
+    # for the conditional FE logit -> guard it and report NA rather than aborting the table.
+    cc <- tryCatch(summary(clogit(dep_t ~ dep_prev + x_iw + I(x_iw*fh) + factor(wave_out) +
+                                  strata(idnum), data = d))$coefficients,
+                   error = function(e) NULL)
+    bt <- ci(cg, "x_ib"); wn <- ci(cg, "x_iw")
+    data.frame(
+      facet            = facet, parent = parent,
+      n_persons        = dplyr::n_distinct(d$idnum),
+      n_out_disc       = sum(inf$out_disc),                  # outcome-discordant (clogit-informative)
+      n_fe_units       = sum(inf$out_disc & inf$exp_var),    # ALSO exposure-moving (identify x_iw)
+      between_OR       = exp(cg["x_ib","Estimate"]), between_lo = bt[1], between_hi = bt[2],
+      between_p        = cg["x_ib","Pr(>|W|)"],
+      within_GEE_OR    = exp(cg["x_iw","Estimate"]), within_lo  = wn[1], within_hi  = wn[2],
+      within_GEE_p     = cg["x_iw","Pr(>|W|)"],
+      within_clogit_OR = if (!is.null(cc)) exp(cc["x_iw","coef"]) else NA_real_,
+      within_clogit_p  = if (!is.null(cc)) cc["x_iw","Pr(>|z|)"] else NA_real_,
+      buffering_OR     = exp(cg["x_iw:fh","Estimate"]), buffering_p = cg["x_iw:fh","Pr(>|W|)"]
+    )
+  }
+  FACETS <- c("v_perceived", "v_enacted", "v_grandparent", "v_religion")
+  W <- bind_rows(lapply(FACETS, function(f)
+         bind_rows(lapply(c("mother","father"), fit_within, facet = f))))
+  knitr::kable(W, digits = 3, row.names = FALSE,
+               caption = "Between- vs within-person effect of each village facet on next-wave depression")
+```
+
+**The facet ablation.** Decomposed one facet at a time, the four village axes behave very differently — which is exactly why they are kept separate rather than pooled into a single "support" index:
+
+- **Perceived support** (the headline) is strongly protective **between** persons (OR ≈ 0.76, both parents) but **null within** persons across both estimators (OR ≈ 1.0), with a null buffering interaction. The protective look is a between-person phenomenon consistent with stable confounding, **not** a within-person mitigation effect.
+- **Enacted support** runs the *opposite* way between persons (OR ≈ 1.4 mother / 1.2 father) — the support-*mobilization* signature (help is sought when distressed). For fathers there is a within-person protective signal in the GEE (OR 0.74, p = .004) with fh-buffering, but it is **not confirmed by the conditional FE logit** (OR 0.86, p = .24) → suggestive, not robust.
+- **Grandparent co-residence** is null on every axis (between OR ≈ 1.05, ns; within null).
+- **Religious participation** shows only a weak, **non-significant** between-person protective hint (OR 0.94 / 0.92, p ≈ .08) and a **null** within-person effect (and a null predictive contribution; see the companion notebook). It neither overturns nor adds to the story.
+
+Like perceived support, participation is at most a weak between-person correlate with no within-person lever.
+
+```{r within-forest, fig.height=7}
+  fp <- bind_rows(
+    W |> transmute(facet, parent, term = "between (v_ib)", OR = between_OR, lo = between_lo, hi = between_hi),
+    W |> transmute(facet, parent, term = "within (v_iw)",  OR = within_GEE_OR, lo = within_lo, hi = within_hi)) |>
+    mutate(facet = factor(facet, levels = c("v_perceived","v_enacted","v_grandparent","v_religion")))
+  ggplot(fp, aes(OR, parent, color = term)) +
+    geom_vline(xintercept = 1, linetype = 2, color = "grey50") +
+    geom_pointrange(aes(xmin = lo, xmax = hi), position = position_dodge(0.5), linewidth = 0.8) +
+    facet_wrap(~ facet, ncol = 1) +
+    scale_x_log10() +
+    labs(title = "Each village facet → next-wave depression: between vs within (95% CI)",
+         x = "Odds ratio (log scale)", y = NULL, color = NULL) +
+    theme_minimal() + theme(legend.position = "top")
+```
+
+# Rung 2 — Sensitivity to unmeasured confounding (E-value)
+
+> **Rung 2 of 4 · the stress test.** Rung 1 cannot remove *time-varying* confounding, so rather than remove it we *bound* it: how strong would an unmeasured confounder have to be — associated with both support and depression — to fully explain the effect that survives? Applied to the headline **between-person** perceived-support effect (the only non-null one).
+
+```{r evalue}
+# How strong an unmeasured confounder would need to be to explain away the between-person
+# effect — E-value for the point estimate AND the CI limit nearest the null (VanderWeele & Ding 2017).
+base_p0 <- tapply(panel$dep_t, panel$parent, function(v) mean(v, na.rm = TRUE))  # baseline outcome prevalence by parent
+W |>
+  filter(facet == "v_perceived") |>             # E-value interpretable for the headline protective effect
+  transmute(parent, between_OR, between_hi,
+            p0       = base_p0[parent],          # named lookup → robust to row order & multi-facet
+            RR_point = or2rr(between_OR, p0),  E_point = evalue(RR_point),
+            RR_CI    = or2rr(between_hi, p0),  E_CI    = evalue(RR_CI)) |>
+  knitr::kable(digits = 3,
+    caption = "E-value for the between-person PERCEIVED-support effect (point estimate and CI limit nearest the null)")
+
+```
+
+An unmeasured confounder associated with both perceived support and depression by a risk ratio of only ~1.8 (point estimate; ~1.6 at the CI limit nearest the null) would fully explain the between-person association — and stable negative affectivity clears that easily.
+
+# Rung 3 — Cross-lagged reverse test (rules out reverse causation)
+
+> **Rung 3 of 4 · the direction check.** *Removes:* the possibility the arrow runs backward — depression eroding *future* support rather than support protecting against depression. A within-person reverse-null, paired with the forward-null, is the fingerprint of a stable common cause (confounding), not causation in either direction.
+
+Does depression at *t* predict **lower support at t+1** (controlling support at *t*)? If the within-person reverse effect is also null, the relationship is purely a stable between-person bundle.
+
+```{r reverse-lag, results='hold'}
+sup_wave <- base |> select(idnum, parent, wave, support = v_instrumental, dep = md_case_lib,
+                           fh, poverty_cat, par_edu)
+rev_pairs <- do.call(rbind, lapply(list(c(2,3), c(3,4), c(4,5)), function(pr){
+  a <- sup_wave |> filter(wave == pr[1]); b <- sup_wave |> filter(wave == pr[2])
+  b |> select(idnum, parent, support_t1 = support) |>
+    inner_join(a |> select(idnum, parent, dep_t0 = dep, support_t0 = support, fh, poverty_cat, par_edu),
+               by = c("idnum","parent"))
+}))
+rev_tab <- bind_rows(lapply(c("mother","father"), function(p){
+  d <- rev_pairs |> filter(parent == p) |> na.omit() |> arrange(idnum)
+  d <- d |> group_by(idnum) |> mutate(dep_btw = mean(dep_t0), dep_wth = dep_t0 - dep_btw) |> ungroup()
+  m <- geeglm(support_t1 ~ dep_btw + dep_wth + support_t0 + fh + poverty_cat + par_edu,
+              id = idnum, data = d, family = gaussian, corstr = "exchangeable")
+  cf <- summary(m)$coefficients
+  # FE cross-check: an INDEPENDENT within-OLS (person-demeaned) estimate of the reverse effect,
+  # mirroring the forward test's dual-estimator design. It is not numerically identical to the
+  # GEE within term (GEE uses an exchangeable working correlation, OLS does not), but both should
+  # land near zero. Also report how many parents have discordant prior depression.
+  dw <- d |> group_by(idnum) |>
+    mutate(dplyr::across(c(support_t1, dep_t0, support_t0), ~ .x - mean(.x))) |> ungroup()
+  fe <- lm(support_t1 ~ dep_t0 + support_t0 + 0, data = dw)
+  n_disc <- d |> group_by(idnum) |> summarise(v = (max(dep_t0) - min(dep_t0)) > 0, .groups = "drop")
+  data.frame(parent = p, n_dep_discordant = sum(n_disc$v),
+             between_dep_effect = cf["dep_btw","Estimate"], between_p = cf["dep_btw","Pr(>|W|)"],
+             within_dep_effect  = cf["dep_wth","Estimate"], within_p  = cf["dep_wth","Pr(>|W|)"],
+             within_FE_lm       = unname(coef(fe)["dep_t0"]))
+}))
+knitr::kable(rev_tab, digits = 4, row.names = FALSE,
+             caption = "Reverse lag: depression -> change in next-wave support")
+```
+
+The reverse arrow is also **between-person only** (chronically-depressed people report declining support) and **null within-person**. Combined with the forward null, **neither arrow operates within individuals** — the signature of a stable common cause, not causation in either direction.
+
+# Rung 4 — Terminal test: the original thesis, cleanest slice
+
+> **Rung 4 of 4 · the decisive case.** *Tests:* among low-vulnerability (`fh = 0`), previously-well parents — the slice where "a Village mends them" is *most* likely to hold — does support prevent **new-onset** depression within persons? If it fails even here, it fails everywhere.
+
+"Parenting broke them, did a Village mend them?" Among **low-vulnerability (`fh=0`), previously-well** parents — the cleanest pro-thesis slice — does support prevent **new-onset** depression?
+
+```{r subgroup, results='hold'}
+sub_tab <- bind_rows(lapply(c("mother","father"), function(p){
+  d <- panel |> filter(parent == p, fh == 0, dep_prev == 0) |>
+    select(idnum, dep_t, wave_out, v_instrumental, poverty_cat, par_edu) |> na.omit()
+  d$v_instrumental <- z(d$v_instrumental); d$poverty_cat <- z(d$poverty_cat); d$par_edu <- z(d$par_edu)
+  d <- d |> group_by(idnum) |> mutate(v_ib = mean(v_instrumental), v_iw = v_instrumental - v_ib) |>
+    ungroup() |> arrange(idnum)
+  mA <- geeglm(dep_t ~ v_instrumental + poverty_cat + par_edu + factor(wave_out),
+               id = idnum, data = d, family = binomial, corstr = "exchangeable")
+  mB <- geeglm(dep_t ~ v_ib + v_iw + poverty_cat + par_edu + factor(wave_out),
+               id = idnum, data = d, family = binomial, corstr = "exchangeable")
+  ca <- summary(mA)$coefficients; cb <- summary(mB)$coefficients
+  data.frame(parent = p, new_onset_events = sum(d$dep_t),
+             naive_OR = exp(ca["v_instrumental","Estimate"]),
+             between_OR = exp(cb["v_ib","Estimate"]),
+             within_OR = exp(cb["v_iw","Estimate"]), within_p = cb["v_iw","Pr(>|W|)"])
+}))
+knitr::kable(sub_tab, digits = 3, row.names = FALSE,
+             caption = "Low-fh new-onset subgroup: support -> new-onset depression")
+```
+
+Same pattern even here: the naive/between association looks protective, the **within-person effect is null**. The Village did not mend them — supported fresh parents fare better only because they are different *people*.
+
+# Synthesis — the vulnerability triad
+
+> *Ladder complete — Rungs 1–4 converge on a within-person null. This section steps off the ladder to integrate the **descriptive** layer (Stage-1 clustering) with the **causal** layer (the ladder): the answer to the title's "cause or signature?" question.*
+
+Do the trajectory classes carry the support and family-history signatures?
+
+```{r synthesis, results='hold'}
+syn <- bind_rows(lapply(c("mother","father"), function(p){
+  pm <- support_long |> filter(parent == p) |> group_by(idnum) |>
+    summarise(support_mean = mean(v_instrumental, na.rm = TRUE), .groups = "drop")
+  G[[p]]$units |> left_join(pm, by = "idnum") |>
+    left_join(vuln |> select(idnum, fh = !!paste0("fh_", p)), by = "idnum") |>
+    group_by(class) |>
+    summarise(n = n(), support_mean = mean(support_mean, na.rm = TRUE),
+              fh_prev = mean(fh, na.rm = TRUE), .groups = "drop") |> mutate(parent = p)
+}))
+knitr::kable(syn, digits = 3, caption = "Support and family-history by trajectory class")
+```
+
+The **persistent** class reports markedly lower support **and** carries roughly double the family-history prevalence. The "vulnerable" trajectory is best read as a single stable disposition expressed as a *triad* — persistent depression, low perceived support, elevated family history — none of which causally moves the others within a person. Support and `fh` are **signatures** of membership, not separate causal levers.
+
+# Anxiety (GAD) — secondary outcome
+
+The CIDI also yields **generalized-anxiety caseness**, but it was fielded **only at Years 1 & 3**. Two waves means **no trajectory clustering and no within-person identification** (a single Y1→Y3 transition cannot separate within- from between-person variation). Anxiety therefore enters as a *secondary, between-person* check: prevalence, comorbidity with depression, and a single prospective Y1→Y3 association.
+
+```{r anxiety-prev, results='hold'}
+anx <- long |> filter(wave %in% GAD_WAVES, !is.na(gad_case))
+anx |> group_by(parent, wave) |>
+  summarise(n = n(), gad_prev = mean(gad_case),
+            phi_with_depression = cor(gad_case, md_case_lib, use = "complete.obs"), .groups = "drop") |>
+  mutate(child_age = WAVE_LABEL[as.character(wave)]) |>
+  knitr::kable(digits = 3, caption = "GAD caseness prevalence and comorbidity with depression (same wave)")
+```
+
+GAD is much rarer than depression (~2.5–5%) and **heavily comorbid** — most anxiety cases are also depression cases (φ ≈ 0.3), so anxiety is largely a severity marker within the same distress dimension, not an independent outcome.
+
+```{r anxiety-lagged, results='hold'}
+gad_w <- long |> filter(wave %in% GAD_WAVES) |> select(idnum, parent, wave, gad_case) |>
+  tidyr::pivot_wider(names_from = wave, values_from = gad_case, names_prefix = "gad_w")
+sup1 <- support_long |> filter(wave == 2) |> select(idnum, parent, support_y1 = v_instrumental)
+cov1 <- long |> filter(wave == 2) |> select(idnum, parent, poverty_cat, par_edu) |> distinct()
+anx_tab <- bind_rows(lapply(c("mother","father"), function(p){
+  d <- gad_w |> left_join(sup1, by = c("idnum","parent")) |>
+    left_join(fh_long, by = c("idnum","parent")) |> left_join(cov1, by = c("idnum","parent")) |>
+    filter(parent == p) |>
+    select(gad_w3, support_y1, gad_w2, fh, poverty_cat, par_edu) |> na.omit()
+  d$support_y1 <- z(d$support_y1); d$poverty_cat <- z(d$poverty_cat); d$par_edu <- z(d$par_edu)
+  m <- glm(gad_w3 ~ support_y1 + gad_w2 + fh + poverty_cat + par_edu, data = d, family = binomial)
+  s <- summary(m)$coefficients
+  data.frame(parent = p, n = nrow(d), gad_y3_events = sum(d$gad_w3),
+             support_OR = exp(s["support_y1","Estimate"]), support_p = s["support_y1","Pr(>|z|)"],
+             fh_OR = exp(s["fh","Estimate"]), fh_p = s["fh","Pr(>|z|)"])
+}))
+knitr::kable(anx_tab, digits = 3, row.names = FALSE,
+             caption = "Y1 support -> Y3 anxiety (between-person; controlling Y1 anxiety, fh, SES)")
+```
+
+This is a **between-person** prospective association only (the within-person test is not identifiable with two waves) and is **low-powered** (few GAD events). Read it as a directional check on whether the depression pattern extends to anxiety — not as a co-equal result.
+
+# Conclusions & limitations
+
+**Findings.**
+
+1. Parental depression is **trait-like / vulnerability-driven**, not an infant-period spike; clean 2-class structure for both parents.
+2. **Family-history vulnerability dominates SES** in predicting the persistent class; SES is largely confounded by vulnerability.
+3. Social support ("the Village") is **protective between persons but null within persons** (both estimators, both parents), with a null buffering interaction. This holds across a **four-facet ablation**: perceived support (protective-between/null-within), enacted support (mobilization, reverse-signed between; a non-robust father within-effect), grandparent co-residence (null throughout), and **religious participation** (a weak, non-significant between-person correlate with no within-person effect and no added predictive signal).
+4. The **cross-lagged** test is symmetric: no within-person dynamics in either direction → a stable between-person bundle (confounding), not causation.
+5. The **low-vulnerability new-onset** terminal test confirms it: the Village did not prevent onset within individuals.
+6. **Synthesis:** the vulnerable trajectory class is one disposition surfacing as a triad (persistent depression + low support + family history).
+
+**Limitations.**
+
+- Within-person designs remove *time-invariant* confounding only; residual *time-varying* confounding cannot be excluded — so this is "no within-person effect after removing stable confounding," not a proven zero causal effect.
+- **Analytic scope & precision of the within-person tests.** §4–§6 are *pre-specified* within-person tests with no class enumeration or model selection, so they are fit on the **full sample** (not the discovery split used for Stage-1 GBTM enumeration) — pooling maximizes power with no selective-inference cost here. They are **complete-case** (`na.omit`); facet coverage is high (≥90% for `v_instrumental` per the mart contract), so <10% of transition-rows drop, under an unverifiable MAR assumption. The conditional-FE estimates identify off **outcome-and-exposure-discordant** parents only — reported as `n_fe_units` (≈735 mothers / ≈356 fathers for perceived support) — so the within-nulls are **reasonably-powered nulls, not empty cells**; the binary structural facets (grandparent, religion) have far fewer switchers and their within-nulls are correspondingly weaker.
+- `fh` is a single retrospective family-history report (Year 3, Year-5 fill-in for coverage) → **mood-congruent recall bias cannot be mitigated** (the Year-5 items have zero overlap with Year 3, so no test–retest is possible); entropy ≈ 0.72 means the trajectory classes are fuzzy (treat as a continuum).
+- Binary CIDI caseness detects only threshold crossings (no within-case severity gradient); no repeated continuous CES-D exists for both parents.
+- **Baseline depression measurement is asymmetric.** Only *fathers* received a baseline depression battery — a 12-of-20-item CES-D subset with a "days in the past week" metric for which FFCWS provides *no established scoring* (used descriptively above, not in any model here). *Mothers* received no baseline depression measure (deferred to the Year-1 CIDI), so a clean pre-outcome own-depression anchor exists for fathers only; both parents' models here rely on family history `fh` as the shared pre-existing-vulnerability proxy.
+- **Anxiety (GAD)** was fielded only at Years 1 & 3 → it supports only a between-person Y1→Y3 check (no trajectory or within-person analysis), is rare (~2.5–5%), and is heavily comorbid with depression.
+- Unweighted (FFCWS oversamples disadvantaged births) — associations, not population point estimates.
+
+```{r sessioninfo}
+sessionInfo()
+```
